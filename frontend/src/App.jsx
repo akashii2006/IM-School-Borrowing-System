@@ -1,73 +1,54 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { AuthProvider } from './context/AuthContext';
-import ProtectedRoute from './components/ProtectedRoute';
-
 import Login from './pages/Login';
-import Register from './pages/Register';
-import Dashboard from './pages/Dashboard';
-import Equipment from './pages/Equipment';
-import Borrowers from './pages/Borrowers';
+import AdminDashboard from './pages/AdminDashboard';
+import StaffDashboard from './pages/StaffDashboard';
+import StudentDashboard from './pages/StudentDashboard';
+import RoomsOffices from './pages/RoomsOffices';
+import PropertyAssignments from './pages/PropertyAssignments';
 import BorrowLogs from './pages/BorrowLogs';
-import Maintenance from './pages/Maintenance';
+
+// Helper component for Admin-only access
+const AdminRoute = ({ children, user }) => {
+  const role = (user.role || user.type || '').toLowerCase();
+  return role === 'admin' ? children : <Navigate to="/dashboard" replace />;
+};
 
 function App() {
+  const user = JSON.parse(localStorage.getItem('user') || '{}');
+  const userRole = (user.role || user.type || '').toLowerCase();
+
   return (
-    <AuthProvider>
-      <Router>
-        <Routes>
-          {/* Public Routes */}
-          <Route path="/" element={<Navigate to="/login" replace />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
+    <Router>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        
+        {/* Unified Dashboard Entry Point */}
+        <Route
+          path="/dashboard"
+          element={
+            userRole === 'admin' ? (
+              <AdminDashboard user={user} />
+            ) : userRole === 'staff' ? (
+              <StaffDashboard user={user} />
+            ) : (
+              <StudentDashboard user={user} />
+            )
+          }
+        />
 
-          {/* Protected Routes (Admin & Staff) */}
-          <Route 
-            path="/dashboard" 
-            element={
-              <ProtectedRoute allowedRoles={['Admin', 'Staff']}>
-                <Dashboard />
-              </ProtectedRoute>
-            } 
-          />
-          <Route 
-            path="/equipment" 
-            element={
-              <ProtectedRoute allowedRoles={['Admin', 'Staff']}>
-                <Equipment />
-              </ProtectedRoute>
-            } 
-          />
-          <Route 
-            path="/borrow" 
-            element={
-              <ProtectedRoute allowedRoles={['Admin', 'Staff']}>
-                <BorrowLogs />
-              </ProtectedRoute>
-            } 
-          />
+        {/* Explicit Role Dashboards */}
+        <Route path="/admin-dashboard" element={<AdminRoute user={user}><AdminDashboard user={user} /></AdminRoute>} />
+        <Route path="/staff-dashboard" element={<StaffDashboard user={user} />} />
+        <Route path="/student-dashboard" element={<StudentDashboard user={user} />} />
 
-          {/* Admin-Only Protected Routes */}
-          <Route 
-            path="/borrowers" 
-            element={
-              <ProtectedRoute allowedRoles={['Admin']}>
-                <Borrowers />
-              </ProtectedRoute>
-            } 
-          />
-          <Route 
-            path="/maintenance" 
-            element={
-              <ProtectedRoute allowedRoles={['Admin']}>
-                <Maintenance />
-              </ProtectedRoute>
-            } 
-          />
+        {/* Admin-Only Management Features */}
+        <Route path="/rooms" element={<AdminRoute user={user}><RoomsOffices /></AdminRoute>} />
+        <Route path="/property-assignments" element={<AdminRoute user={user}><PropertyAssignments /></AdminRoute>} />
+        <Route path="/borrow-logs" element={<AdminRoute user={user}><BorrowLogs /></AdminRoute>} />
 
-          <Route path="*" element={<Navigate to="/login" replace />} />
-        </Routes>
-      </Router>
-    </AuthProvider>
+        <Route path="*" element={<Navigate to="/login" replace />} />
+      </Routes>
+    </Router>
   );
 }
 

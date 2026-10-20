@@ -1,51 +1,73 @@
-import { useContext } from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import { AuthContext } from '../context/AuthContext';
+import { useNavigate } from 'react-router-dom';
 
-const Sidebar = () => {
-  const { user } = useContext(AuthContext);
-  const location = useLocation();
-
-  const isActive = (path) => (location.pathname === path ? 'active' : '');
+const Sidebar = ({ user }) => {
+  const navigate = useNavigate();
+  const role = (user?.role || user?.type || '').toLowerCase();
+  const isAdmin = role === 'admin';
 
   return (
-    <div className="sidebar-nav">
-      <div className="sidebar-brand">
-        <div>
-          <h2>NAVIGATION</h2>
-          <small>INVENTORY SYSTEM</small>
+    <div
+      className="p-3 text-white d-flex flex-column justify-content-between shadow-sm"
+      style={{ width: '260px', minWidth: '260px', backgroundColor: '#0d233a' }}
+    >
+      <div>
+        <div className="px-2 mb-4">
+          <small className="text-uppercase text-white-50 fw-bold tracking-wider" style={{ fontSize: '0.7rem' }}>
+            Navigation
+          </small>
+          <h6 className="fw-bold text-white mb-0 mt-1">
+            {isAdmin ? 'ADMINISTRATOR' : role === 'staff' ? 'FACULTY PORTAL' : 'BORROWER PORTAL'}
+          </h6>
+        </div>
+
+        <div className="nav flex-column nav-pills gap-2">
+          <button
+            onClick={() => navigate('/dashboard')}
+            className="nav-link text-start rounded-3 d-flex align-items-center px-3 py-2 text-white hover-light border-0 bg-transparent"
+          >
+            <i className="bi bi-speedometer2 me-3 fs-5"></i>
+            Dashboard Overview
+          </button>
+
+          {/* Admin-Only Navigation Links */}
+          {isAdmin && (
+            <>
+              <button
+                onClick={() => navigate('/borrow-logs')}
+                className="nav-link text-start rounded-3 d-flex align-items-center px-3 py-2 text-white-50 hover-light border-0 bg-transparent"
+              >
+                <i className="bi bi-journal-text me-3 fs-5"></i>
+                Borrow Logs & Returns
+              </button>
+              <button
+                onClick={() => navigate('/rooms')}
+                className="nav-link text-start rounded-3 d-flex align-items-center px-3 py-2 text-white-50 hover-light border-0 bg-transparent"
+              >
+                <i className="bi bi-building me-3 fs-5"></i>
+                Rooms & Offices
+              </button>
+              <button
+                onClick={() => navigate('/property-assignments')}
+                className="nav-link text-start rounded-3 d-flex align-items-center px-3 py-2 text-white-50 hover-light border-0 bg-transparent"
+              >
+                <i className="bi bi-person-workspace me-3 fs-5"></i>
+                Property Assignments
+              </button>
+            </>
+          )}
         </div>
       </div>
 
-      <div className="sidebar-label">MAIN MENU</div>
-
-      <div className="sidebar-links d-flex flex-column">
-        <Link to="/dashboard" className={`nav-link ${isActive('/dashboard')}`}>
-          <span><i className="bi bi-speedometer2"></i></span> Dashboard
-        </Link>
-        <Link to="/equipment" className={`nav-link ${isActive('/equipment')}`}>
-          <span><i className="bi bi-tools"></i></span> Equipment
-        </Link>
-        <Link to="/borrow" className={`nav-link ${isActive('/borrow')}`}>
-          <span><i className="bi bi-journal-text"></i></span> Borrow Logs
-        </Link>
-
-        {user?.role === 'Admin' && (
-          <>
-            <div className="sidebar-label mt-2">ADMINISTRATION</div>
-            <Link to="/borrowers" className={`nav-link ${isActive('/borrowers')}`}>
-              <span><i className="bi bi-people"></i></span> Borrowers
-            </Link>
-            <Link to="/maintenance" className={`nav-link ${isActive('/maintenance')}`}>
-              <span><i className="bi bi-wrench-adjustable"></i></span> Maintenance
-            </Link>
-          </>
-        )}
-      </div>
-
-      <div className="sidebar-bottom">
-        <div className="sidebar-status">
-          <span></span> Server Connected
+      {/* Sidebar User Info Card */}
+      <div className="p-3 rounded-3 mt-auto" style={{ backgroundColor: 'rgba(255, 255, 255, 0.05)' }}>
+        <div className="d-flex align-items-center">
+          <i className="bi bi-person-badge-fill fs-2 text-info me-2"></i>
+          <div className="text-truncate">
+            <div className="fw-bold text-white text-truncate">{user.name || user.full_name || 'User Account'}</div>
+            <small className="text-white-50 d-block text-truncate">
+              Role: {user.role || user.type || 'User'}
+            </small>
+          </div>
         </div>
       </div>
     </div>

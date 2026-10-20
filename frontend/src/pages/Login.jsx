@@ -1,86 +1,112 @@
-import { useState, useContext } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { AuthContext } from '../context/AuthContext';
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import API from '../api/axiosInstance';
 
-const Login = () => {
+const Login = ({ setUser }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
-  const { login } = useContext(AuthContext);
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
-  const handleLoginSubmit = async (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setErrorMsg('');
-
-    if (!username.trim() || !password.trim()) {
-      setErrorMsg('Please enter your username and password.');
-      return;
-    }
+    setLoading(true);
 
     try {
-      const response = await API.post('/auth/login', { username, password });
-      login(response.data.user);
-      navigate('/dashboard');
-    } catch (err) {
-      setErrorMsg(err.response?.data?.message || 'Login failed. Please check your credentials.');
-    }
-  };
+      const response = await API.post('/auth/login', {
+        username: username.trim(),
+        password: password.trim()
+      });
 
-  const handleForgotPassword = (e) => {
-    e.preventDefault();
-    alert('Please contact the system administrator to reset your password.');
+      if (response.data && response.data.user) {
+        const userData = response.data.user;
+        localStorage.setItem('user', JSON.stringify(userData));
+        if (setUser) setUser(userData);
+        navigate('/dashboard', { replace: true });
+        window.location.reload(); // Ensures state refreshes cleanly
+      } else {
+        setErrorMsg('Invalid response from server.');
+      }
+    } catch (err) {
+      console.error('Login submit error:', err);
+      const serverMessage = err.response?.data?.message || 'Login failed. Please check your credentials.';
+      setErrorMsg(serverMessage);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
-    <div className="login-page">
-      <div className="login-card">
-        <span className="login-label text-uppercase">Welcome Back</span>
-        <h1 className="mt-1">SCHOOL BORROW</h1>
-        <p className="login-description">School Inventory Management System</p>
+    <div
+      className="d-flex align-items-center justify-content-center min-vh-100"
+      style={{ backgroundColor: '#1a5b6e' }}
+    >
+      <div
+        className="card shadow-lg p-4 border-0 rounded-4"
+        style={{ width: '100%', maxWidth: '420px', backgroundColor: '#ffffff' }}
+      >
+        <div className="text-center mb-4">
+          <small className="text-uppercase tracking-wider text-muted fw-semibold">WELCOME BACK</small>
+          <h2 className="fw-extrabold text-dark mt-1 mb-0" style={{ letterSpacing: '-0.5px' }}>
+            SCHOOL BORROW
+          </h2>
+          <small className="text-muted">School Inventory Management System</small>
+        </div>
 
-        {errorMsg && <div className="alert alert-danger py-2">{errorMsg}</div>}
+        {errorMsg && (
+          <div className="alert alert-danger text-center small py-2 rounded-3 mb-3" role="alert">
+            {errorMsg}
+          </div>
+        )}
 
-        <form onSubmit={handleLoginSubmit}>
-          <div className="text-start mb-3">
-            <label className="form-label fw-semibold">Username</label>
+        <form onSubmit={handleSubmit}>
+          <div className="mb-3">
+            <label className="form-label small fw-bold text-secondary">Username / ID Number</label>
             <input
               type="text"
-              className="form-control"
-              placeholder="Enter username"
+              className="form-control form-control-lg fs-6 bg-light border-0"
+              placeholder="e.g. admin or 123"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
+              required
             />
           </div>
 
-          <div className="text-start mb-3">
-            <label className="form-label fw-semibold">Password</label>
+          <div className="mb-4">
+            <label className="form-label small fw-bold text-secondary">Password</label>
             <input
               type="password"
-              className="form-control"
-              placeholder="Enter password"
+              className="form-control form-control-lg fs-6 bg-light border-0"
+              placeholder="••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              required
             />
           </div>
 
-          <div className="d-flex justify-content-between align-items-center mb-4">
-            <a href="#forgot" className="login-link" onClick={handleForgotPassword}>
-              Forgot Password?
-            </a>
-            <Link to="/register" className="login-link">
-              Register Account
-            </Link>
-          </div>
-
-          <button type="submit" className="btn login-button w-100">
-            Sign In
+          <button
+            type="submit"
+            disabled={loading}
+            className="btn btn-primary btn-lg w-100 fw-bold rounded-3"
+            style={{ backgroundColor: '#0f4c5c', borderColor: '#0f4c5c' }}
+          >
+            {loading ? (
+              <span>
+                <span className="spinner-border spinner-border-sm me-2" role="status"></span>
+                Signing In...
+              </span>
+            ) : (
+              'Sign In'
+            )}
           </button>
         </form>
 
-        <div className="login-footer">
-          &copy; 2026 SCHOOL BORROW | University of Cabuyao
+        <div className="text-center mt-4">
+          <small className="text-muted" style={{ fontSize: '0.75rem' }}>
+            © 2026 SCHOOL BORROW | University of Cabuyao
+          </small>
         </div>
       </div>
     </div>

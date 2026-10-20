@@ -1,9 +1,13 @@
 const express = require('express');
 const router = express.Router();
-const borrowController = require('../controllers/borrowController');
+const controller = require('../controllers/borrowController');
 
-router.get('/', borrowController.getBorrowLogs);
-router.post('/', borrowController.createBorrowLog);
-router.post('/return', borrowController.returnItem);
+router.get('/', controller.getBorrowLogs);
+router.post('/', controller.createBorrowRequest);
+router.post('/request', controller.createBorrowRequest);
+router.put('/approve/:id', controller.approveBorrowRequest);
+router.put('/reject/:id', controller.rejectBorrowRequest);
+router.post('/requests/:id/return', controller.processReturn);
+router.put('/return/:id', controller.processReturn);
 
 module.exports = router;

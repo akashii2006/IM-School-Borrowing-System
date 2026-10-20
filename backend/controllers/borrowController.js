@@ -1,206 +1,192 @@
 const db = require('../config/db');
 
-// Helper function to dynamically inspect database table column names
-const getTableColumns = async (tableName) => {
+// 1. Fetch all borrow logs
+const getBorrowLogs = async (req, res) => {
   try {
-    const [cols] = await db.query(`SHOW COLUMNS FROM ${tableName}`);
-    return cols.map((c) => c.Field);
-  } catch (err) {
-    console.error(`Error inspecting table ${tableName}:`, err.message);
-    return [];
-  }
-};
-
-// 1. Fetch All Borrow Logs
-exports.getBorrowLogs = async (req, res) => {
-  try {
-    const logCols = await getTableColumns('borrow_logs');
-    const equipCols = await getTableColumns('equipment_items');
-
-    const itemFk = logCols.includes('item_id')
-      ? 'item_id'
-      : logCols.includes('equipment_id')
-      ? 'equipment_id'
-      : 'item_id';
-
-    const equipPk = equipCols.includes('item_id')
-      ? 'item_id'
-      : equipCols.includes('id')
-      ? 'id'
-      : 'item_id';
-
-    const logPk = logCols.includes('log_id') ? 'log_id' : 'id';
-
     const [logs] = await db.query(`
       SELECT 
-        bl.*,
-        bl.${itemFk} AS item_id,
-        COALESCE(ei.item_name, 'Unknown Equipment') AS item_name,
-        COALESCE(ei.property_number, 'N/A') AS property_number,
-        COALESCE(b.full_name, 'Unknown Borrower') AS full_name,
-        COALESCE(b.id_number, 'N/A') AS id_number
+        bl.log_id,
+        bl.borrower_id,
+        bl.item_id,
+        bl.usage_room_id,
+        bl.date_borrowed,
+        bl.expected_return_date,
+        bl.date_returned,
+        bl.item_condition_on_borrow,
+        bl.item_condition_on_return,
+        bl.overall_status,
+        bl.remarks,
+        i.name AS item_name,
+        i.item_code,
+        COALESCE(u.full_name, 'Student Borrower') AS full_name,
+        COALESCE(u.username, bl.borrower_id) AS id_number,
+        ro.room_name AS usage_room_name,
+        ro.building AS usage_building
       FROM borrow_logs bl
-      LEFT JOIN equipment_items ei ON bl.${itemFk} = ei.${equipPk}
-      LEFT JOIN borrowers b ON bl.borrower_id = b.borrower_id
-      ORDER BY bl.${logPk} DESC
+      LEFT JOIN items i ON bl.item_id = i.item_id
+      LEFT JOIN users u ON bl.borrower_id = u.user_id
+      LEFT JOIN rooms_offices ro ON bl.usage_room_id = ro.room_id
+      ORDER BY bl.log_id DESC
     `);
-
-    res.json(logs);
+    
+    res.json({ success: true, data: logs });
   } catch (err) {
     console.error('Error fetching borrow logs:', err);
-    res.status(500).json({ message: 'Failed to retrieve borrow logs.', error: err.message });
+    res.status(500).json({ message: 'Failed to fetch borrow logs', error: err.message });
   }
 };
 
-// 2. Create Borrow Request with Dynamic Column Detection
-exports.createBorrowLog = async (req, res) => {
-  const { borrower_id, item_id, expected_return_date, item_condition_on_borrow } = req.body;
+// 2. Create borrow request
+const createBorrowRequest = async (req, res) => {
+  const { borrower_id, item_id, usage_room_id, expected_return_date, item_condition_on_borrow } = req.body;
 
-  const cleanBorrowerId = parseInt(borrower_id, 10);
-  const cleanItemId = parseInt(item_id, 10);
-
-  if (!cleanBorrowerId || !cleanItemId) {
-    return res.status(400).json({
-      message: `Invalid request payload: borrower_id=${borrower_id}, item_id=${item_id}`
+  if (!borrower_id || !item_id || !usage_room_id || !expected_return_date) {
+    return res.status(400).json({ 
+      message: 'Borrower ID, Item, Usage Room, and Expected Return Date are strictly required.' 
     });
   }
 
   try {
-    const logCols = await getTableColumns('borrow_logs');
-    const equipCols = await getTableColumns('equipment_items');
+    const [userRows] = await db.query(
+      'SELECT role FROM users WHERE user_id = ? OR username = ?', 
+      [borrower_id, borrower_id]
+    );
+    
+    const userRole = (userRows[0]?.role || req.body.role || 'Student').toLowerCase();
 
-    // Auto-detect foreign key column name
-    const itemFk = logCols.includes('item_id')
-      ? 'item_id'
-      : logCols.includes('equipment_id')
-      ? 'equipment_id'
-      : 'item_id';
+    const [itemRows] = await db.query('SELECT status, name FROM items WHERE item_id = ?', [item_id]);
 
-    // Auto-detect status column name
-    const statusCol = logCols.includes('overall_status')
-      ? 'overall_status'
-      : logCols.includes('status')
-      ? 'status'
-      : 'overall_status';
-
-    const condCol = logCols.includes('item_condition_on_borrow')
-      ? 'item_condition_on_borrow'
-      : logCols.includes('condition_on_borrow')
-      ? 'condition_on_borrow'
-      : null;
-
-    const dateCol = logCols.includes('date_borrowed')
-      ? 'date_borrowed'
-      : logCols.includes('borrow_date')
-      ? 'borrow_date'
-      : null;
-
-    const retDateCol = logCols.includes('expected_return_date')
-      ? 'expected_return_date'
-      : logCols.includes('return_date')
-      ? 'return_date'
-      : null;
-
-    // Build dynamic INSERT statement based on actual table columns
-    const fields = ['borrower_id', itemFk, statusCol];
-    const placeholders = ['?', '?', "'Active'"];
-    const values = [cleanBorrowerId, cleanItemId];
-
-    if (dateCol) {
-      fields.push(dateCol);
-      placeholders.push('NOW()');
+    if (itemRows.length === 0) {
+      return res.status(404).json({ message: 'Equipment item not found.' });
     }
 
-    if (retDateCol && expected_return_date) {
-      fields.push(retDateCol);
-      placeholders.push('?');
-      values.push(expected_return_date);
+    if (itemRows[0].status !== 'available') {
+      return res.status(400).json({ 
+        message: `"${itemRows[0].name}" is currently unavailable (${itemRows[0].status}).` 
+      });
     }
 
-    if (condCol) {
-      fields.push(condCol);
-      placeholders.push('?');
-      values.push(item_condition_on_borrow || 'Good');
+    const requestStatus = userRole === 'staff' ? 'Active' : 'Pending';
+
+    const [result] = await db.query(
+      `INSERT INTO borrow_logs (borrower_id, item_id, usage_room_id, date_borrowed, expected_return_date, item_condition_on_borrow, overall_status)
+       VALUES (?, ?, ?, NOW(), ?, ?, ?)`,
+      [borrower_id, item_id, usage_room_id, expected_return_date, item_condition_on_borrow || 'Good', requestStatus]
+    );
+
+    if (userRole === 'staff') {
+      await db.query(`UPDATE items SET status = 'borrowed' WHERE item_id = ?`, [item_id]);
     }
 
-    const queryStr = `INSERT INTO borrow_logs (${fields.join(', ')}) VALUES (${placeholders.join(', ')})`;
-    console.log('[EXECUTING SQL]:', queryStr, values);
-
-    const [result] = await db.query(queryStr, values);
-
-    // Update equipment status to 'Borrowed' in catalog table
-    const equipPk = equipCols.includes('item_id')
-      ? 'item_id'
-      : equipCols.includes('id')
-      ? 'id'
-      : 'item_id';
-
-    if (equipCols.includes('status')) {
-      await db.query(
-        `UPDATE equipment_items SET status = 'Borrowed' WHERE ${equipPk} = ?`,
-        [cleanItemId]
-      );
-    }
-
-    console.log('[SUCCESS] Borrow record saved. Insert ID:', result.insertId);
-    return res.status(201).json({
-      message: 'Borrow request recorded successfully',
-      log_id: result.insertId
+    res.status(201).json({
+      success: true,
+      message: userRole === 'staff'
+        ? 'Faculty request automatically approved! Equipment status updated to borrowed.'
+        : 'Borrow request submitted successfully and pending admin approval.',
+      log_id: result.insertId,
+      status: requestStatus
     });
-
   } catch (err) {
-    console.error('[SQL ERROR] Insert failed:', err);
-    return res.status(500).json({ message: `Database error: ${err.message}` });
+    console.error('Error creating borrow request:', err);
+    res.status(500).json({ message: 'Failed to process borrow request', error: err.message });
   }
 };
 
-// 3. Process Return Item with Dynamic Column Detection
-exports.returnItem = async (req, res) => {
-  const { log_id, item_id } = req.body;
-  const cleanLogId = parseInt(log_id, 10);
-  const cleanItemId = parseInt(item_id, 10);
+// 3. Admin Approve Borrow Request
+const approveBorrowRequest = async (req, res) => {
+  const { id } = req.params;
 
   try {
-    const logCols = await getTableColumns('borrow_logs');
-    const equipCols = await getTableColumns('equipment_items');
-
-    const logPk = logCols.includes('log_id') ? 'log_id' : 'id';
-    const statusCol = logCols.includes('overall_status')
-      ? 'overall_status'
-      : logCols.includes('status')
-      ? 'status'
-      : 'overall_status';
-
-    const retDateCol = logCols.includes('date_returned')
-      ? 'date_returned'
-      : logCols.includes('return_date')
-      ? 'return_date'
-      : null;
-
-    let updateLogStr = `UPDATE borrow_logs SET ${statusCol} = 'Returned'`;
-    if (retDateCol) {
-      updateLogStr += `, ${retDateCol} = NOW()`;
-    }
-    updateLogStr += ` WHERE ${logPk} = ?`;
-
-    await db.query(updateLogStr, [cleanLogId]);
-
-    const equipPk = equipCols.includes('item_id')
-      ? 'item_id'
-      : equipCols.includes('id')
-      ? 'id'
-      : 'item_id';
-
-    if (equipCols.includes('status')) {
-      await db.query(
-        `UPDATE equipment_items SET status = 'Available' WHERE ${equipPk} = ?`,
-        [cleanItemId]
-      );
+    const [logRows] = await db.query('SELECT item_id FROM borrow_logs WHERE log_id = ?', [id]);
+    if (logRows.length === 0) {
+      return res.status(404).json({ message: 'Borrow record not found.' });
     }
 
-    res.json({ message: 'Item successfully returned.' });
+    const itemId = logRows[0].item_id;
+
+    // Set borrow log status to Active
+    await db.query(`UPDATE borrow_logs SET overall_status = 'Active', date_borrowed = NOW() WHERE log_id = ?`, [id]);
+
+    // Set item status to borrowed
+    await db.query(`UPDATE items SET status = 'borrowed' WHERE item_id = ?`, [itemId]);
+
+    res.json({ message: 'Borrow request approved successfully!' });
   } catch (err) {
-    console.error('Error returning item:', err);
-    res.status(500).json({ message: `Failed to return item: ${err.message}` });
+    console.error('Error approving request:', err);
+    res.status(500).json({ message: 'Failed to approve request', error: err.message });
   }
+};
+
+// 4. Admin Reject Borrow Request
+const rejectBorrowRequest = async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    await db.query(`UPDATE borrow_logs SET overall_status = 'Rejected' WHERE log_id = ?`, [id]);
+    res.json({ message: 'Borrow request rejected.' });
+  } catch (err) {
+    console.error('Error rejecting request:', err);
+    res.status(500).json({ message: 'Failed to reject request', error: err.message });
+  }
+};
+
+// 5. Process Return Inspection
+const processReturn = async (req, res) => {
+  const { id } = req.params;
+  const { return_condition, fine_amount, remarks } = req.body;
+
+  const condition = String(return_condition || 'good').toLowerCase();
+
+  try {
+    const [requestRows] = await db.query(
+      `SELECT log_id, item_id FROM borrow_logs WHERE log_id = ?`,
+      [id]
+    );
+
+    if (requestRows.length === 0) {
+      return res.status(404).json({ message: 'Borrowing record not found.' });
+    }
+
+    const itemId = requestRows[0].item_id;
+
+    await db.query(
+      `UPDATE borrow_logs 
+       SET date_returned = NOW(), 
+           overall_status = 'Returned', 
+           item_condition_on_return = ?,
+           remarks = ?
+       WHERE log_id = ?`,
+      [condition, remarks || '', id]
+    );
+
+    const newEquipmentStatus = condition === 'damaged' ? 'maintenance' : 'available';
+
+    await db.query(
+      `UPDATE items 
+       SET status = ?, 
+           condition_status = ? 
+       WHERE item_id = ?`,
+      [newEquipmentStatus, condition, itemId]
+    );
+
+    res.json({
+      success: true,
+      message: condition === 'damaged'
+        ? 'Item flagged as damaged and routed to Maintenance. Return completed.'
+        : 'Inspection passed! Equipment marked as Available.'
+    });
+  } catch (err) {
+    console.error('Error processing return inspection:', err);
+    res.status(500).json({ message: 'Failed to process return', error: err.message });
+  }
+};
+
+module.exports = {
+  getBorrowLogs,
+  createBorrowLog: createBorrowRequest,
+  createBorrowRequest,
+  approveBorrowRequest,
+  rejectBorrowRequest,
+  returnItem: processReturn,
+  processReturn
 };
